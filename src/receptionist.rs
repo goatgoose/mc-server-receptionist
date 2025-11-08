@@ -1,5 +1,8 @@
+use serde::de;
 use tokio::net::TcpListener;
 use tokio::io;
+use crate::codec::VarInt;
+use crate::protocol::Handshake;
 
 pub struct Receptionist {
 
@@ -22,7 +25,7 @@ impl Receptionist {
                         Ok(n) => {
                             buf.truncate(n);
                             println!("{:?}", buf);
-                            return;
+                            break;
                         },
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                             continue;
@@ -33,6 +36,11 @@ impl Receptionist {
                         }
                     }
                 }
+
+                let handshake: Handshake = serde::Deserialize::deserialize(
+                    de::value::SeqDeserializer::<_, de::value::Error>::new(buf.into_iter())
+                ).unwrap();
+                println!("{:?}", handshake);
             });
         }
     }

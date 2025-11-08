@@ -2,7 +2,11 @@ use std::fmt::Formatter;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{SeqAccess, Visitor};
 
-struct VarInt {
+
+
+
+#[derive(Debug)]
+pub struct VarInt {
     pub value: i32,
 }
 
@@ -26,7 +30,7 @@ impl<'de> Deserialize<'de> for VarInt {
             type Value = VarInt;
 
             fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-                formatter.write_str("Var variable-length integer")
+                formatter.write_str("a variable-length integer")
             }
 
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -41,7 +45,7 @@ impl<'de> Deserialize<'de> for VarInt {
 
                 loop {
                     let byte: u8 = seq.next_element()?
-                        .ok_or_else(|| de::Error::custom("unexpected enf of VarInt"))?;
+                        .ok_or_else(|| de::Error::custom("unexpected end of VarInt"))?;
                     value |= ((byte & segment_bits) as i32) << position;
 
                     if byte & continue_bit == 0 {
@@ -60,6 +64,12 @@ impl<'de> Deserialize<'de> for VarInt {
         }
 
         deserializer.deserialize_seq(VarIntVisitor)
+    }
+}
+
+impl Into<i32> for VarInt {
+    fn into(self) -> i32 {
+        self.value
     }
 }
 
