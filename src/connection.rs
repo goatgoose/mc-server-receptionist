@@ -1,17 +1,20 @@
+use crate::protocol::{
+    Handshake, HandshakeIntent, Message, MessageType, Packet, PingRequest, PingResponse,
+    StatusRequest, StatusResponse,
+};
+use crate::util::AsyncPeek;
 use std::collections::VecDeque;
-use crate::protocol::{Handshake, HandshakeIntent, Message, MessageType, Packet, StatusRequest, StatusResponse, PingResponse, PingRequest};
 use tokio::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::net::TcpStream;
-use crate::util::AsyncPeek;
 
-pub struct Connection<'a, S: AsyncRead + AsyncWrite + AsyncPeek+ Unpin> {
+pub struct Connection<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
     stream: S,
     send_queue: VecDeque<Packet<'a>>,
     path: Option<HandshakeIntent>,
 }
 
-impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek+ Unpin> Connection<'a, S> {
+impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
     pub fn new(stream: S) -> Self {
         Connection {
             stream,
@@ -34,7 +37,7 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek+ Unpin> Connection<'a, S> {
             let mut buf = vec![0, 1];
             match self.stream.peek(&mut buf).await {
                 Ok(n) if n == 0 => break,
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => return Err(e),
             }
 
@@ -44,7 +47,7 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek+ Unpin> Connection<'a, S> {
             match packet.message {
                 Message::Handshake(handshake) => self.recv_handshake(handshake)?,
                 Message::StatusRequest(request) => self.recv_status_request(request)?,
-                Message::PingRequest(request)  => self.recv_ping_request(request)?,
+                Message::PingRequest(request) => self.recv_ping_request(request)?,
                 _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::Unsupported,
@@ -80,7 +83,7 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek+ Unpin> Connection<'a, S> {
         self.send_queue.push_back(packet);
         Ok(())
     }
-    
+
     fn recv_ping_request(&mut self, ping_request: PingRequest) -> Result<(), io::Error> {
         let response = PingResponse {
             timestamp: ping_request.timestamp,

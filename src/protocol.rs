@@ -1,8 +1,8 @@
 use crate::codec::{VarInt, VarIntString};
-use std::io;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::io::AsyncReadExt;
 use serde_json::json;
+use std::io;
+use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 #[derive(Debug)]
 pub struct Packet<'a> {
@@ -11,9 +11,7 @@ pub struct Packet<'a> {
 
 impl<'a> Packet<'a> {
     pub fn new(message: Message<'a>) -> Self {
-        Packet {
-            message,
-        }
+        Packet { message }
     }
 
     pub async fn read_from<R: AsyncRead + Unpin>(
@@ -33,13 +31,15 @@ impl<'a> Packet<'a> {
                     ));
                 }
             },
-            Some(HandshakeIntent::Status) => {
-                match id {
-                    0x00 => Message::StatusRequest(StatusRequest {}),
-                    0x01 => Message::PingRequest(PingRequest::read_from(reader).await?),
-                    _ => return Err(io::Error::new(io::ErrorKind::Unsupported, "Unrecognized status packet received"))
+            Some(HandshakeIntent::Status) => match id {
+                0x00 => Message::StatusRequest(StatusRequest {}),
+                0x01 => Message::PingRequest(PingRequest::read_from(reader).await?),
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "Unrecognized status packet received",
+                    ));
                 }
-
             },
             Some(_) => {
                 return Err(io::Error::new(
@@ -49,9 +49,7 @@ impl<'a> Packet<'a> {
             }
         };
 
-        Ok(Packet {
-            message,
-        })
+        Ok(Packet { message })
     }
 
     pub async fn write_to<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> io::Result<()> {
@@ -62,13 +60,18 @@ impl<'a> Packet<'a> {
                 let packet_id = 0x00;
                 packet_id.to_var_int(&mut buf).await?;
                 response.write_to(&mut buf).await?;
-            },
+            }
             Message::PingResponse(response) => {
                 let packet_id = 0x01;
                 packet_id.to_var_int(&mut buf).await?;
                 response.write_to(&mut buf).await?;
-            },
-            _ => return Err(io::Error::new(io::ErrorKind::Unsupported, "Unimplemented message write")),
+            }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "Unimplemented message write",
+                ));
+            }
         }
 
         (buf.len() as i32).to_var_int(writer).await?;
@@ -192,9 +195,7 @@ impl PingRequest {
     pub async fn read_from<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Self> {
         let timestamp = reader.read_u64().await?;
 
-        Ok(PingRequest {
-            timestamp,
-        })
+        Ok(PingRequest { timestamp })
     }
 }
 

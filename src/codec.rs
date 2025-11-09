@@ -43,7 +43,7 @@ impl VarInt for i32 {
             let byte = (value & 0xFF) as u8;
             if value & !(section_bits as u32) == 0 {
                 writer.write_u8(byte).await?;
-                return Ok(())
+                return Ok(());
             }
 
             let byte = (byte & section_bits) | continue_bit;
