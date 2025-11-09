@@ -1,8 +1,8 @@
 use crate::codec::{VarInt, VarIntString};
-use serde::{Deserialize, Serialize};
-use std::io;
-use std::io::Read;
 use byteorder::{NetworkEndian, ReadBytesExt};
+use std::io;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncReadExt;
 
 #[derive(Debug)]
 pub struct Packet {
@@ -12,25 +12,29 @@ pub struct Packet {
 }
 
 impl Packet {
-    pub fn read_from<R: Read>(reader: &mut R, connection_path: Option<HandshakeIntent>) -> io::Result<Self> {
-        let length = i32::from_var_int(reader)?;
-        let id = i32::from_var_int(reader)?;
+    pub async fn read_from<R: AsyncRead + Unpin>(
+        reader: &mut R,
+        connection_path: Option<HandshakeIntent>,
+    ) -> io::Result<Self> {
+        let length = i32::from_var_int(reader).await?;
+        let id = i32::from_var_int(reader).await?;
 
         let message = match connection_path {
-            None => {
-                match id {
-                    0x00 => Message::Handshake(Handshake::read_from(reader)?),
-                    _ => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::Unsupported,
-                            format!("Unknown packet ID: {:x}", id),
-                        ));
-                    }
+            None => match id {
+                0x00 => Message::Handshake(Handshake::read_from(reader).await?),
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        format!("Unknown packet ID: {:x}", id),
+                    ));
                 }
             },
             Some(HandshakeIntent::Status) => Message::StatusRequest(StatusRequest {}),
             Some(_) => {
-                return Err(io::Error::new(io::ErrorKind::Unsupported, "Unsupported connection path"));
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "Unsupported connection path",
+                ));
             }
         };
 
@@ -40,6 +44,12 @@ impl Packet {
             message,
         })
     }
+}
+
+#[derive(Debug)]
+pub enum MessageType {
+    Handshake,
+    StatusRequest,
 }
 
 #[derive(Debug)]
@@ -57,11 +67,11 @@ pub struct Handshake {
 }
 
 impl Handshake {
-    pub fn read_from<R: Read>(reader: &mut R) -> io::Result<Self> {
-        let protocol_version = i32::from_var_int(reader)?;
-        let server_address = String::from_var_int_string(reader)?;
-        let server_port = reader.read_u16::<NetworkEndian>()?;
-        let intent = HandshakeIntent::read_from(reader)?;
+    pub async fn read_from<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Self> {
+        let protocol_version = i32::from_var_int(reader).await?;
+        let server_address = String::from_var_int_string(reader).await?;
+        let server_port = reader.read_u16().await?;
+        let intent = HandshakeIntent::read_from(reader).await?;
 
         Ok(Handshake {
             protocol_version,
@@ -72,7 +82,7 @@ impl Handshake {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 pub enum HandshakeIntent {
     Status,
     Login,
@@ -80,13 +90,16 @@ pub enum HandshakeIntent {
 }
 
 impl HandshakeIntent {
-    pub fn read_from<R: Read>(reader: &mut R) -> io::Result<Self> {
-        let intent = i32::from_var_int(reader)?;
+    pub async fn read_from<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Self> {
+        let intent = i32::from_var_int(reader).await?;
         match intent {
             1 => Ok(HandshakeIntent::Status),
             2 => Ok(HandshakeIntent::Login),
             3 => Ok(HandshakeIntent::Transfer),
-            _ => Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown handshake intent")),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Unknown handshake intent",
+            )),
         }
     }
 }

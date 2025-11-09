@@ -1,22 +1,23 @@
 use byteorder::ReadBytesExt;
-use std::{io, io::Read};
+use std::io;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 pub trait VarInt {
     const MAX_BYTES: u8;
-    fn from_var_int<R: Read>(reader: &mut R) -> Result<i32, io::Error>;
+    async fn from_var_int<R: AsyncRead + Unpin>(reader: &mut R) -> Result<i32, io::Error>;
 }
 
 impl VarInt for i32 {
     const MAX_BYTES: u8 = 5;
 
-    fn from_var_int<R: Read>(reader: &mut R) -> Result<i32, io::Error> {
+    async fn from_var_int<R: AsyncRead + Unpin>(reader: &mut R) -> Result<i32, io::Error> {
         let section_bits = 0b01111111;
         let continue_bit = 0b10000000;
 
         let mut value = 0;
         let mut position = 0;
         loop {
-            let byte = reader.read_u8()?;
+            let byte = reader.read_u8().await?;
             value |= ((byte & section_bits) as i32) << position;
 
             if byte & continue_bit == 0 {
@@ -34,14 +35,17 @@ impl VarInt for i32 {
 }
 
 pub trait VarIntString {
-    fn from_var_int_string<R: Read>(reader: &mut R) -> Result<String, io::Error>;
+    async fn from_var_int_string<R: AsyncRead + Unpin>(reader: &mut R)
+    -> Result<String, io::Error>;
 }
 
 impl VarIntString for String {
-    fn from_var_int_string<R: Read>(reader: &mut R) -> Result<String, io::Error> {
-        let len = i32::from_var_int(reader)?;
+    async fn from_var_int_string<R: AsyncRead + Unpin>(
+        reader: &mut R,
+    ) -> Result<String, io::Error> {
+        let len = i32::from_var_int(reader).await?;
         let mut buf: Vec<u8> = vec![0; len as usize];
-        reader.read_exact(&mut buf)?;
+        reader.read_exact(&mut buf).await?;
         let str = String::from_utf8(buf)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "String is not valid UTF8"))?;
         Ok(str)
@@ -53,8 +57,8 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
-    #[test]
-    fn var_int() -> Result<(), io::Error> {
+    #[tokio::test]
+    async fn var_int() -> Result<(), io::Error> {
         struct TestCase {
             sample: Vec<u8>,
             expected_value: i32,
@@ -111,7 +115,7 @@ mod tests {
 
         for test_case in test_cases {
             let mut cursor = Cursor::new(test_case.sample);
-            let value = i32::from_var_int(&mut cursor)?;
+            let value = i32::from_var_int(&mut cursor).await?;
 
             assert_eq!(value, test_case.expected_value);
         }
