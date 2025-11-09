@@ -7,12 +7,16 @@ use crate::connection::protocol::{
 };
 use crate::util::AsyncPeek;
 use std::collections::VecDeque;
+use std::io::ErrorKind::InvalidData;
 use rand::Rng;
-use rsa::{RsaPrivateKey, RsaPublicKey};
+use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use rsa::pkcs1::EncodeRsaPublicKey;
 use rsa::pkcs8::EncodePublicKey;
 use tokio::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
+
+type Aes128Cfb8Enc = cfb8::Encryptor<aes::Aes128>;
+type Aes128Cfb8Dec = cfb8::Decryptor<aes::Aes128>;
 
 pub struct Connection<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
     stream: S,
@@ -101,14 +105,10 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
     fn recv_login_start(&mut self, login_start: LoginStart) -> Result<(), io::Error> {
         let public_key = self.crypto.public_key.to_public_key_der().unwrap();
 
-        let mut rng = rand::thread_rng();
-        let mut verify_token = [0u8; 16];
-        rng.fill(&mut verify_token);
-
         let request = EncryptionRequest {
             sever_id: "".to_string(),
             public_key: public_key.into_vec(),
-            verify_token: Vec::from(verify_token),
+            verify_token: self.crypto.verify_token.clone(),
             should_authenticate: true,
         };
         let packet = Packet::new(Message::EncryptionRequest(request));
@@ -117,6 +117,20 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
     }
 
     fn recv_encryption_response(&mut self, response: EncryptionResponse) -> io::Result<()> {
+        let shared_secret = self.crypto.private_key
+            .decrypt(Pkcs1v15Encrypt, response.shared_secret.as_slice())
+            .map_err(|_| io::Error::new(InvalidData, "Unable to decrypt shared secret"))?;
+        let verify_token = self.crypto.private_key
+            .decrypt(Pkcs1v15Encrypt, response.verify_token.as_slice())
+            .map_err(|_| io::Error::new(InvalidData, "Unable to decrypt verify token"))?;
+
+        println!("shared secret: {:?}", shared_secret);
+        println!("verify token: {:?}", verify_token);
+
+        if verify_token != self.crypto.verify_token {
+            return Err(io::Error::new(InvalidData, "invalid verify token"));
+        }
+
         Ok(())
     }
 }
@@ -124,6 +138,7 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
 struct Crypto {
     private_key: RsaPrivateKey,
     public_key: RsaPublicKey,
+    verify_token: Vec<u8>,
 }
 
 impl Crypto {
@@ -133,9 +148,14 @@ impl Crypto {
             .expect("Failed to generate a key.");
         let public_key = RsaPublicKey::from(&private_key);
 
+        let mut verify_token = [0u8; 16];
+        rng.fill(&mut verify_token);
+        let verify_token = Vec::from(verify_token);
+
         Crypto {
             private_key,
             public_key,
+            verify_token,
         }
     }
 }

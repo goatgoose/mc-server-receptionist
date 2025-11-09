@@ -12,3 +12,5 @@ uuid = { version = "1" }
 log = "0.4.28"
 rsa = { version = "0.9" }
 rand = "0.8.5"
+cfb8 = { version = "0.8" }
+aes = { version = "0.8" }
