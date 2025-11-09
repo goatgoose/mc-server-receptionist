@@ -50,6 +50,7 @@ impl Packet {
 pub enum MessageType {
     Handshake,
     StatusRequest,
+    StatusResponse,
 }
 
 #[derive(Debug)]
@@ -106,3 +107,9 @@ impl HandshakeIntent {
 
 #[derive(Debug)]
 pub struct StatusRequest {}
+
+
+// #[derive(Debug)]
+// pub struct StatusResponse<'a> {
+//
+// }

@@ -3,6 +3,7 @@ mod connection;
 mod elastic_ip_manager;
 mod protocol;
 mod receptionist;
+mod util;
 
 use receptionist::Receptionist;
 use tokio::io;
