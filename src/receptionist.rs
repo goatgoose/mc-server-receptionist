@@ -1,8 +1,4 @@
-use crate::codec::VarInt;
 use crate::connection::Connection;
-use crate::protocol::{Handshake, HandshakeIntent, Message, Packet};
-use serde::de;
-use std::io::Cursor;
 use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 

@@ -1,12 +1,14 @@
-use crate::protocol::{
-    Handshake, HandshakeIntent, Message, MessageType, Packet, PingRequest, PingResponse,
-    StatusRequest, StatusResponse,
+mod codec;
+mod protocol;
+
+use crate::connection::protocol::{
+    Handshake, HandshakeIntent, Message, Packet, PingRequest, PingResponse, StatusRequest,
+    StatusResponse,
 };
 use crate::util::AsyncPeek;
 use std::collections::VecDeque;
 use tokio::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
-use tokio::net::TcpStream;
 
 pub struct Connection<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
     stream: S,
@@ -76,7 +78,7 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
             version_protocol: 773,
             max_players: 20,
             online_players: 0,
-            description: "A test message!",
+            description: "A fake MC server!",
             favicon: "",
         };
         let packet = Packet::new(Message::StatusResponse(response));
