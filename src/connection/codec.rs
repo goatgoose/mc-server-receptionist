@@ -57,6 +57,11 @@ impl VarInt for i32 {
 pub trait VarIntString {
     async fn from_var_int_string<R: AsyncRead + Unpin>(reader: &mut R)
     -> Result<String, io::Error>;
+
+    async fn to_var_int_string<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> Result<(), io::Error>;
 }
 
 impl VarIntString for String {
@@ -69,6 +74,61 @@ impl VarIntString for String {
         let str = String::from_utf8(buf)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "String is not valid UTF8"))?;
         Ok(str)
+    }
+
+    async fn to_var_int_string<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> Result<(), io::Error> {
+        (self.len() as i32).to_var_int(writer).await?;
+        let len = writer.write(self.as_bytes()).await?;
+        assert_eq!(len, self.len());
+        Ok(())
+    }
+}
+
+pub trait PrefixedArrayItem: Sized {
+    async fn read_from<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Self>;
+    async fn write_to<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> io::Result<()>;
+}
+
+pub trait PrefixedArray {
+    async fn from_prefixed_array<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Self>
+    where
+        Self: Sized;
+
+    async fn to_prefixed_array<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> io::Result<()>;
+}
+
+impl<T: PrefixedArrayItem> PrefixedArray for Vec<T> {
+    async fn from_prefixed_array<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Self>
+    where
+        Self: Sized,
+    {
+        let len = i32::from_var_int(reader).await?;
+        let mut vec = Vec::with_capacity(len as usize);
+        for _ in 0..len {
+            vec.push(T::read_from(reader).await?);
+        }
+        Ok(vec)
+    }
+
+    async fn to_prefixed_array<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> io::Result<()> {
+        (self.len() as i32).to_var_int(writer).await?;
+        for item in self {
+            item.write_to(writer).await?;
+        }
+        Ok(())
+    }
+}
+
+impl PrefixedArrayItem for u8 {
+    async fn read_from<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Self> {
+        reader.read_u8().await
+    }
+
+    async fn write_to<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_u8(self.clone()).await
     }
 }
 

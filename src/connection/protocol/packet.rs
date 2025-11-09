@@ -1,5 +1,5 @@
 use crate::connection::codec::VarInt;
-use crate::connection::protocol::Handshake;
+use crate::connection::protocol::{EncryptionResponse, Handshake, LoginStart};
 use crate::connection::protocol::{HandshakeIntent, Message, PingRequest, StatusRequest};
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -41,6 +41,16 @@ impl<'a> Packet<'a> {
                     ));
                 }
             },
+            Some(HandshakeIntent::Login) => match id {
+                0x00 => Message::LoginStart(LoginStart::read_from(reader).await?),
+                0x01 => Message::EncryptionResponse(EncryptionResponse::read_from(reader).await?),
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "Unrecognized login packet received",
+                    ));
+                }
+            },
             Some(_) => {
                 return Err(io::Error::new(
                     io::ErrorKind::Unsupported,
@@ -65,6 +75,11 @@ impl<'a> Packet<'a> {
                 let packet_id = 0x01;
                 packet_id.to_var_int(&mut buf).await?;
                 response.write_to(&mut buf).await?;
+            }
+            Message::EncryptionRequest(request) => {
+                let packet_id = 0x01;
+                packet_id.to_var_int(&mut buf).await?;
+                request.write_to(&mut buf).await?;
             }
             _ => {
                 return Err(io::Error::new(

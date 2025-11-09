@@ -2,8 +2,8 @@ mod codec;
 mod protocol;
 
 use crate::connection::protocol::{
-    Handshake, HandshakeIntent, Message, Packet, PingRequest, PingResponse, StatusRequest,
-    StatusResponse,
+    EncryptionRequest, EncryptionResponse, Handshake, HandshakeIntent, LoginStart, Message, Packet,
+    PingRequest, PingResponse, StatusRequest, StatusResponse,
 };
 use crate::util::AsyncPeek;
 use std::collections::VecDeque;
@@ -50,6 +50,8 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
                 Message::Handshake(handshake) => self.recv_handshake(handshake)?,
                 Message::StatusRequest(request) => self.recv_status_request(request)?,
                 Message::PingRequest(request) => self.recv_ping_request(request)?,
+                Message::LoginStart(login_start) => self.recv_login_start(login_start)?,
+                Message::EncryptionResponse(response) => self.recv_encryption_response(response)?,
                 _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::Unsupported,
@@ -63,12 +65,7 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
     }
 
     fn recv_handshake(&mut self, handshake: Handshake) -> Result<(), io::Error> {
-        match handshake.intent {
-            HandshakeIntent::Status => {
-                self.path = Some(handshake.intent);
-            }
-            _ => {}
-        }
+        self.path = Some(handshake.intent);
         Ok(())
     }
 
@@ -92,6 +89,22 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
         };
         let packet = Packet::new(Message::PingResponse(response));
         self.send_queue.push_back(packet);
+        Ok(())
+    }
+
+    fn recv_login_start(&mut self, login_start: LoginStart) -> Result<(), io::Error> {
+        let request = EncryptionRequest {
+            sever_id: "".to_string(),
+            public_key: vec![],
+            verify_token: vec![],
+            should_authenticate: false,
+        };
+        let packet = Packet::new(Message::EncryptionRequest(request));
+        self.send_queue.push_back(packet);
+        Ok(())
+    }
+
+    fn recv_encryption_response(&mut self, response: EncryptionResponse) -> io::Result<()> {
         Ok(())
     }
 }
