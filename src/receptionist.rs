@@ -1,13 +1,11 @@
-use std::io::Cursor;
-use serde::de;
-use tokio::net::TcpListener;
-use tokio::io;
 use crate::codec::VarInt;
 use crate::protocol::{Handshake, Packet};
+use serde::de;
+use std::io::Cursor;
+use tokio::io;
+use tokio::net::TcpListener;
 
-pub struct Receptionist {
-
-}
+pub struct Receptionist {}
 
 impl Receptionist {
     pub async fn listen(self, addr: &str) -> io::Result<()> {
@@ -27,10 +25,10 @@ impl Receptionist {
                             buf.truncate(n);
                             println!("{:?}", buf);
                             break;
-                        },
+                        }
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                             continue;
-                        },
+                        }
                         Err(e) => {
                             eprintln!("{:?}", e);
                             return;

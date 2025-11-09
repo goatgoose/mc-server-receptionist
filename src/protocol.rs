@@ -1,7 +1,7 @@
+use crate::codec::{VarInt, VarIntString};
+use serde::{Deserialize, Serialize};
 use std::io;
 use std::io::Read;
-use serde::{Deserialize, Serialize};
-use crate::codec::{VarInt, VarIntString};
 
 #[derive(Debug)]
 pub struct Packet {
@@ -20,9 +20,9 @@ impl Packet {
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::Unsupported,
-                    format!("Unknown packet ID: {:x}", id)
+                    format!("Unknown packet ID: {:x}", id),
                 ));
-            },
+            }
         };
 
         Ok(Packet {

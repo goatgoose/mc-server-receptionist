@@ -1,10 +1,10 @@
-mod receptionist;
+mod codec;
 mod elastic_ip_manager;
 mod protocol;
-mod codec;
+mod receptionist;
 
-use tokio::io;
 use receptionist::Receptionist;
+use tokio::io;
 
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
