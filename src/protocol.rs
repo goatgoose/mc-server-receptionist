@@ -1,7 +1,5 @@
 use crate::codec::{VarInt, VarIntString};
-use byteorder::{NetworkEndian, ReadBytesExt};
 use std::io;
-use serde::Deserialize;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::io::AsyncReadExt;
 use serde_json::json;
@@ -38,7 +36,7 @@ impl<'a> Packet<'a> {
             Some(HandshakeIntent::Status) => {
                 match id {
                     0x00 => Message::StatusRequest(StatusRequest {}),
-                    0x01 => return Err(io::Error::new(io::ErrorKind::Unsupported, "Ping packet unimplemented")),
+                    0x01 => Message::PingRequest(PingRequest::read_from(reader).await?),
                     _ => return Err(io::Error::new(io::ErrorKind::Unsupported, "Unrecognized status packet received"))
                 }
 
@@ -60,16 +58,21 @@ impl<'a> Packet<'a> {
         let mut buf = Vec::new();
 
         match &self.message {
-            Message::StatusResponse(status_response) => {
-                let packet_id = 0;
+            Message::StatusResponse(response) => {
+                let packet_id = 0x00;
                 packet_id.to_var_int(&mut buf).await?;
-                status_response.write_to(&mut buf).await?;
-
-                (buf.len() as i32).to_var_int(writer).await?;
-                writer.write(buf.as_slice()).await?;
-            }
+                response.write_to(&mut buf).await?;
+            },
+            Message::PingResponse(response) => {
+                let packet_id = 0x01;
+                packet_id.to_var_int(&mut buf).await?;
+                response.write_to(&mut buf).await?;
+            },
             _ => return Err(io::Error::new(io::ErrorKind::Unsupported, "Unimplemented message write")),
         }
+
+        (buf.len() as i32).to_var_int(writer).await?;
+        writer.write(buf.as_slice()).await?;
 
         writer.flush().await?;
 
@@ -89,6 +92,8 @@ pub enum Message<'a> {
     Handshake(Handshake),
     StatusRequest(StatusRequest),
     StatusResponse(StatusResponse<'a>),
+    PingRequest(PingRequest),
+    PingResponse(PingResponse),
 }
 
 #[derive(Debug)]
@@ -175,5 +180,31 @@ impl<'a> StatusResponse<'a> {
         writer.flush().await?;
 
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct PingRequest {
+    pub timestamp: u64,
+}
+
+impl PingRequest {
+    pub async fn read_from<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Self> {
+        let timestamp = reader.read_u64().await?;
+
+        Ok(PingRequest {
+            timestamp,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct PingResponse {
+    pub timestamp: u64,
+}
+
+impl PingResponse {
+    pub async fn write_to<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_u64(self.timestamp).await
     }
 }
