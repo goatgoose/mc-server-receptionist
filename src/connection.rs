@@ -7,6 +7,10 @@ use crate::connection::protocol::{
 };
 use crate::util::AsyncPeek;
 use std::collections::VecDeque;
+use rand::Rng;
+use rsa::{RsaPrivateKey, RsaPublicKey};
+use rsa::pkcs1::EncodeRsaPublicKey;
+use rsa::pkcs8::EncodePublicKey;
 use tokio::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
@@ -14,6 +18,7 @@ pub struct Connection<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
     stream: S,
     send_queue: VecDeque<Packet<'a>>,
     path: Option<HandshakeIntent>,
+    crypto: Crypto,
 }
 
 impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
@@ -22,6 +27,7 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
             stream,
             send_queue: VecDeque::new(),
             path: None,
+            crypto: Crypto::new(),
         }
     }
 
@@ -93,11 +99,17 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
     }
 
     fn recv_login_start(&mut self, login_start: LoginStart) -> Result<(), io::Error> {
+        let public_key = self.crypto.public_key.to_public_key_der().unwrap();
+
+        let mut rng = rand::thread_rng();
+        let mut verify_token = [0u8; 16];
+        rng.fill(&mut verify_token);
+
         let request = EncryptionRequest {
             sever_id: "".to_string(),
-            public_key: vec![],
-            verify_token: vec![],
-            should_authenticate: false,
+            public_key: public_key.into_vec(),
+            verify_token: Vec::from(verify_token),
+            should_authenticate: true,
         };
         let packet = Packet::new(Message::EncryptionRequest(request));
         self.send_queue.push_back(packet);
@@ -106,5 +118,24 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
 
     fn recv_encryption_response(&mut self, response: EncryptionResponse) -> io::Result<()> {
         Ok(())
+    }
+}
+
+struct Crypto {
+    private_key: RsaPrivateKey,
+    public_key: RsaPublicKey,
+}
+
+impl Crypto {
+    pub fn new() -> Self {
+        let mut rng = rand::thread_rng();
+        let private_key = RsaPrivateKey::new(&mut rng, 1024)
+            .expect("Failed to generate a key.");
+        let public_key = RsaPublicKey::from(&private_key);
+
+        Crypto {
+            private_key,
+            public_key,
+        }
     }
 }
