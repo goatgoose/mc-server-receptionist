@@ -46,7 +46,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek+ Unpin> Connection<S> {
             }
 
             let packet = Packet::read_from(&mut self.stream, self.path).await?;
-            println!("{:?}", packet);
+            println!("received: {:?}", packet);
 
             match packet.message {
                 Message::Handshake(handshake) => self.recv_handshake(handshake)?,
@@ -88,6 +88,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek+ Unpin> Connection<S> {
             favicon: "",
         };
         let packet = Packet::new(Message::StatusResponse(status_response));
+        println!("sending: {:?}", packet);
         packet.write_to(&mut self.stream).await?;
 
         Ok(())

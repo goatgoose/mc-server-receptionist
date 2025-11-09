@@ -35,7 +35,14 @@ impl<'a> Packet<'a> {
                     ));
                 }
             },
-            Some(HandshakeIntent::Status) => Message::StatusRequest(StatusRequest {}),
+            Some(HandshakeIntent::Status) => {
+                match id {
+                    0x00 => Message::StatusRequest(StatusRequest {}),
+                    0x01 => return Err(io::Error::new(io::ErrorKind::Unsupported, "Ping packet unimplemented")),
+                    _ => return Err(io::Error::new(io::ErrorKind::Unsupported, "Unrecognized status packet received"))
+                }
+
+            },
             Some(_) => {
                 return Err(io::Error::new(
                     io::ErrorKind::Unsupported,

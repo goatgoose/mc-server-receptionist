@@ -22,7 +22,7 @@ impl Receptionist {
                 match connection.process().await {
                     Ok(_) => {}
                     Err(e) => {
-                        eprintln!("{e}");
+                        eprintln!("error: {e}");
                         return;
                     }
                 }
