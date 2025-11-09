@@ -9,7 +9,7 @@ use tokio::io;
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
     let receptionist = Receptionist {};
-    receptionist.listen("localhost:25565").await?;
+    receptionist.listen("0.0.0.0:25565").await?;
 
     Ok(())
 }

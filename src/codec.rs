@@ -40,7 +40,8 @@ pub trait VarIntString {
 impl VarIntString for String {
     fn from_var_int_string<R: Read>(reader: &mut R) -> Result<String, io::Error> {
         let len = i32::from_var_int(reader)?;
-        let buf: Vec<u8> = vec![0; len as usize];
+        let mut buf: Vec<u8> = vec![0; len as usize];
+        reader.read_exact(&mut buf)?;
         let str = String::from_utf8(buf)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "String is not valid UTF8"))?;
         Ok(str)

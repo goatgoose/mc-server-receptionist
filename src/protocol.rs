@@ -2,6 +2,7 @@ use crate::codec::{VarInt, VarIntString};
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::io::Read;
+use byteorder::{NetworkEndian, ReadBytesExt};
 
 #[derive(Debug)]
 pub struct Packet {
@@ -42,16 +43,19 @@ pub enum Message {
 pub struct Handshake {
     pub protocol_version: i32,
     pub server_address: String,
+    pub server_port: u16,
 }
 
 impl Handshake {
     pub fn read_from<R: Read>(reader: &mut R) -> io::Result<Self> {
         let protocol_version = i32::from_var_int(reader)?;
         let server_address = String::from_var_int_string(reader)?;
+        let server_port = reader.read_u16::<NetworkEndian>()?;
 
         Ok(Handshake {
             protocol_version,
             server_address,
+            server_port,
         })
     }
 }
