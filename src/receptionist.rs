@@ -1,8 +1,9 @@
+use std::io::Cursor;
 use serde::de;
 use tokio::net::TcpListener;
 use tokio::io;
 use crate::codec::VarInt;
-use crate::protocol::Handshake;
+use crate::protocol::{Handshake, Packet};
 
 pub struct Receptionist {
 
@@ -37,9 +38,8 @@ impl Receptionist {
                     }
                 }
 
-                let handshake: Handshake = serde::Deserialize::deserialize(
-                    de::value::SeqDeserializer::<_, de::value::Error>::new(buf.into_iter())
-                ).unwrap();
+                let mut cursor = Cursor::new(buf);
+                let handshake = Packet::read_from(&mut cursor);
                 println!("{:?}", handshake);
             });
         }

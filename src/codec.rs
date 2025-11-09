@@ -1,84 +1,48 @@
-use std::fmt::Formatter;
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
-use serde::de::{SeqAccess, Visitor};
+use std::{
+    io,
+    io::Read,
+};
+use byteorder::ReadBytesExt;
 
-
-
-
-#[derive(Debug)]
-pub struct VarInt {
-    pub value: i32,
+pub trait VarInt {
+    const MAX_BYTES: u8;
+    fn from_var_int<R: Read>(reader: &mut R) -> Result<i32, io::Error>;
 }
 
-impl Serialize for VarInt {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer
-    {
-        todo!()
-    }
-}
+impl VarInt for i32 {
+    const MAX_BYTES: u8 = 5;
 
-impl<'de> Deserialize<'de> for VarInt {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>
-    {
-        struct VarIntVisitor;
+    fn from_var_int<R: Read>(reader: &mut R) -> Result<i32, io::Error> {
+        let section_bits = 0b01111111;
+        let continue_bit = 0b10000000;
 
-        impl<'de> Visitor<'de> for VarIntVisitor {
-            type Value = VarInt;
+        let mut value = 0;
+        let mut position = 0;
+        loop {
+            let byte = reader.read_u8()?;
+            value |= ((byte & section_bits) as i32) << position;
 
-            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-                formatter.write_str("a variable-length integer")
+            if byte & continue_bit == 0 {
+                break;
             }
 
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: SeqAccess<'de>,
-            {
-                let segment_bits = 0b01111111;
-                let continue_bit = 0b10000000;
-
-                let mut value: i32 = 0;
-                let mut position = 0;
-
-                loop {
-                    let byte: u8 = seq.next_element()?
-                        .ok_or_else(|| de::Error::custom("unexpected end of VarInt"))?;
-                    value |= ((byte & segment_bits) as i32) << position;
-
-                    if byte & continue_bit == 0 {
-                        break;
-                    }
-
-                    position += 7;
-
-                    if position >= 35 {
-                        return Err(de::Error::custom("VarInt is too big"));
-                    }
-                }
-
-                Ok(VarInt {value})
+            position += 7;
+            if (position >= 7 * Self::MAX_BYTES) {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "VarInt too big"));
             }
         }
 
-        deserializer.deserialize_seq(VarIntVisitor)
-    }
-}
-
-impl Into<i32> for VarInt {
-    fn into(self) -> i32 {
-        self.value
+        Ok(value)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
     use super::*;
 
     #[test]
-    fn var_int() {
+    fn var_int() -> Result<(), io::Error> {
         struct TestCase {
             sample: Vec<u8>,
             expected_value: i32,
@@ -134,13 +98,12 @@ mod tests {
         ];
 
         for test_case in test_cases {
-            let var_int: VarInt = serde::Deserialize::deserialize(
-                de::value::SeqDeserializer::<_, de::value::Error>::new(
-                    test_case.sample.into_iter()
-                )
-            ).unwrap();
+            let mut cursor = Cursor::new(test_case.sample);
+            let value = i32::from_var_int(&mut cursor)?;
 
-            assert_eq!(var_int.value, test_case.expected_value);
+            assert_eq!(value, test_case.expected_value);
         }
+
+        Ok(())
     }
 }
