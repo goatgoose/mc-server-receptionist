@@ -1,9 +1,8 @@
-use crate::protocol::{Handshake, HandshakeIntent, Message, MessageType, Packet, StatusRequest};
+use crate::protocol::{Handshake, HandshakeIntent, Message, MessageType, Packet, StatusRequest, StatusResponse};
 use std::io::{Cursor, Error};
 use tokio::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::net::TcpStream;
-use crate::protocol::MessageType::StatusResponse;
 use crate::util::AsyncPeek;
 
 pub struct Connection<S: AsyncRead + AsyncWrite + AsyncPeek+ Unpin> {
@@ -25,7 +24,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek+ Unpin> Connection<S> {
         loop {
             if let Some(next_write) = &self.next_write {
                 match next_write {
-                    MessageType::StatusResponse => self.send_status_response()?,
+                    MessageType::StatusResponse => self.send_status_response().await?,
                     _ => {
                         return Err(io::Error::new(
                             io::ErrorKind::Unsupported,
@@ -75,11 +74,22 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek+ Unpin> Connection<S> {
     }
 
     fn recv_status_request(&mut self, status_request: StatusRequest) -> Result<(), io::Error> {
-        self.next_write = Some(StatusResponse);
+        self.next_write = Some(MessageType::StatusResponse);
         Ok(())
     }
 
-    fn send_status_response(&mut self) -> Result<(), io::Error> {
+    async fn send_status_response(&mut self) -> Result<(), io::Error> {
+        let status_response = StatusResponse {
+            version_name: "1.21.10",
+            version_protocol: 773,
+            max_players: 20,
+            online_players: 0,
+            description: "A test message!",
+            favicon: "",
+        };
+        let packet = Packet::new(Message::StatusResponse(status_response));
+        packet.write_to(&mut self.stream).await?;
+
         Ok(())
     }
 }

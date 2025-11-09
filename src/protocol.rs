@@ -1,17 +1,23 @@
 use crate::codec::{VarInt, VarIntString};
 use byteorder::{NetworkEndian, ReadBytesExt};
 use std::io;
-use tokio::io::AsyncRead;
+use serde::Deserialize;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::io::AsyncReadExt;
+use serde_json::json;
 
 #[derive(Debug)]
-pub struct Packet {
-    pub length: i32,
-    pub id: i32,
-    pub message: Message,
+pub struct Packet<'a> {
+    pub message: Message<'a>,
 }
 
-impl Packet {
+impl<'a> Packet<'a> {
+    pub fn new(message: Message<'a>) -> Self {
+        Packet {
+            message,
+        }
+    }
+
     pub async fn read_from<R: AsyncRead + Unpin>(
         reader: &mut R,
         connection_path: Option<HandshakeIntent>,
@@ -39,10 +45,28 @@ impl Packet {
         };
 
         Ok(Packet {
-            length,
-            id,
             message,
         })
+    }
+
+    pub async fn write_to<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> io::Result<()> {
+        let mut buf = Vec::new();
+
+        match &self.message {
+            Message::StatusResponse(status_response) => {
+                let packet_id = 0;
+                packet_id.to_var_int(&mut buf).await?;
+                status_response.write_to(&mut buf).await?;
+
+                (buf.len() as i32).to_var_int(writer).await?;
+                writer.write(buf.as_slice()).await?;
+            }
+            _ => return Err(io::Error::new(io::ErrorKind::Unsupported, "Unimplemented message write")),
+        }
+
+        writer.flush().await?;
+
+        Ok(())
     }
 }
 
@@ -54,9 +78,10 @@ pub enum MessageType {
 }
 
 #[derive(Debug)]
-pub enum Message {
+pub enum Message<'a> {
     Handshake(Handshake),
     StatusRequest(StatusRequest),
+    StatusResponse(StatusResponse<'a>),
 }
 
 #[derive(Debug)]
@@ -108,8 +133,40 @@ impl HandshakeIntent {
 #[derive(Debug)]
 pub struct StatusRequest {}
 
+#[derive(Debug)]
+pub struct StatusResponse<'a> {
+    pub version_name: &'a str,
+    pub version_protocol: u32,
+    pub max_players: u32,
+    pub online_players: u32,
+    //pub player_samples: Vec<PlayerSample<'a>>,
+    pub description: &'a str,
+    pub favicon: &'a str,
+}
 
-// #[derive(Debug)]
-// pub struct StatusResponse<'a> {
-//
-// }
+impl<'a> StatusResponse<'a> {
+    pub async fn write_to<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> io::Result<()> {
+        let response_json = json!({
+            "version": {
+                "name": self.version_name,
+                "protocol": self.version_protocol,
+            },
+            "players": {
+                "max": self.max_players,
+                "online": self.online_players,
+            },
+            "description": {
+                "text": self.description,
+            },
+            "favicon": self.favicon,
+            "enforcesSecureChat": false,
+        });
+        let response_json = response_json.to_string();
+
+        (response_json.len() as i32).to_var_int(writer).await?;
+        writer.write(response_json.as_bytes()).await?;
+        writer.flush().await?;
+
+        Ok(())
+    }
+}
