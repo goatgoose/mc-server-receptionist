@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 
 pub struct Connection<S: AsyncRead + AsyncWrite + Unpin> {
     stream: S,
-    next_read: Option<MessageType>,
+    next_read: bool,
     next_write: Option<MessageType>,
     path: Option<HandshakeIntent>,
 }
@@ -15,7 +15,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
     pub fn new(stream: S) -> Self {
         Connection {
             stream,
-            next_read: Some(MessageType::Handshake),
+            next_read: true,
             next_write: None,
             path: None,
         }
@@ -23,8 +23,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
 
     pub async fn process(&mut self) -> Result<(), io::Error> {
         while !self.finished() {
-            if let Some(_) = &self.next_read {
-                self.next_read = None;
+            if self.next_read {
+                self.next_read = false;
 
                 let packet = Packet::read_from(&mut self.stream, self.path).await?;
                 println!("{:?}", packet);
@@ -49,9 +49,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
     }
 
     fn finished(&self) -> bool {
-        if let None = self.next_read
-            && let None = self.next_write
-        {
+        if !self.next_read && let None = self.next_write {
             true
         } else {
             false
@@ -61,7 +59,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
     fn recv_handshake(&mut self, handshake: Handshake) -> Result<(), io::Error> {
         match handshake.intent {
             HandshakeIntent::Status => {
-                self.next_read = Some(MessageType::StatusRequest);
+                self.next_read = true;
                 self.path = Some(handshake.intent);
             }
             _ => {}
