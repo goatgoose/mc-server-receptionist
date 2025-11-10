@@ -2,8 +2,9 @@ mod codec;
 mod protocol;
 
 use crate::connection::protocol::{
-    EncryptionRequest, EncryptionResponse, Handshake, HandshakeIntent, LoginStart, LoginSuccess,
-    Message, Packet, PingRequest, PingResponse, StatusRequest, StatusResponse,
+    EncryptionRequest, EncryptionResponse, Handshake, HandshakeIntent, LoginAcknowledged,
+    LoginStart, LoginSuccess, Message, Packet, PingRequest, PingResponse, StatusRequest,
+    StatusResponse, Transfer,
 };
 use crate::util::AsyncPeek;
 use aes::Aes128;
@@ -93,7 +94,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
                 Message::PingRequest(request) => self.recv_ping_request(request)?,
                 Message::LoginStart(login_start) => self.recv_login_start(login_start)?,
                 Message::EncryptionResponse(response) => self.recv_encryption_response(response)?,
-                Message::LoginAcknowledged(_) => {}
+                Message::LoginAcknowledged(ack) => self.recv_login_ack(ack)?,
                 _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::Unsupported,
@@ -182,6 +183,17 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             username: self.player_username.clone().unwrap(),
         };
         let packet = Packet::new(Message::LoginSuccess(login_success));
+        self.send_queue.push_back(packet);
+
+        Ok(())
+    }
+
+    fn recv_login_ack(&mut self, ack: LoginAcknowledged) -> io::Result<()> {
+        let transfer = Transfer {
+            hostname: "classic.goatgoose.com".to_string(),
+            port: 25565,
+        };
+        let packet = Packet::new(Message::Transfer(transfer));
         self.send_queue.push_back(packet);
 
         Ok(())

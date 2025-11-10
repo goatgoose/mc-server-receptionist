@@ -51,8 +51,8 @@ impl Packet {
                 Err(io::Error::new(
                     io::ErrorKind::Unsupported,
                     format!(
-                        "Unrecognized packet received: {:X} for path {:?}",
-                        id, connection_path
+                        "Unrecognized packet received: {:X} for path {:?} with len {}",
+                        id, connection_path, length
                     ),
                 ))
             }
@@ -82,6 +82,11 @@ impl Packet {
                 let packet_id = 0x02;
                 packet_id.to_var_int(&mut buf).await?;
                 login_success.write_to(&mut buf).await?;
+            }
+            Message::Transfer(transfer) => {
+                let packet_id = 0x0B;
+                packet_id.to_var_int(&mut buf).await?;
+                transfer.write_to(&mut buf).await?;
             }
             _ => {
                 return Err(io::Error::new(

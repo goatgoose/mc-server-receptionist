@@ -1,7 +1,7 @@
 use crate::connection::codec::{VarInt, VarIntString};
 use crate::connection::protocol::{
     EncryptionRequest, EncryptionResponse, LoginAcknowledged, LoginStart, LoginSuccess,
-    PingRequest, PingResponse, StatusRequest, StatusResponse,
+    PingRequest, PingResponse, StatusRequest, StatusResponse, Transfer,
 };
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -18,6 +18,7 @@ pub enum Message {
     EncryptionResponse(EncryptionResponse),
     LoginSuccess(LoginSuccess),
     LoginAcknowledged(LoginAcknowledged),
+    Transfer(Transfer),
 }
 
 #[derive(Debug)]
