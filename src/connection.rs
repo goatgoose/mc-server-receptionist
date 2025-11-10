@@ -25,6 +25,9 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter, R
 use tokio::time::sleep;
 use uuid::Uuid;
 
+// Buy as much time as possible to allow for the server to come up without timing out.
+const STALL_AMOUNT: u64 = 15;
+
 type AesCfb8 = Cfb8<Aes128>;
 
 pub struct Connection<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
@@ -101,8 +104,8 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
                 Message::Handshake(handshake) => self.recv_handshake(handshake)?,
                 Message::StatusRequest(request) => self.recv_status_request(request)?,
                 Message::PingRequest(request) => self.recv_ping_request(request)?,
-                Message::LoginStart(login_start) => self.recv_login_start(login_start)?,
-                Message::EncryptionResponse(response) => self.recv_encryption_response(response)?,
+                Message::LoginStart(login_start) => self.recv_login_start(login_start).await?,
+                Message::EncryptionResponse(response) => self.recv_encryption_response(response).await?,
                 Message::LoginAcknowledged(ack) => self.recv_login_ack(ack).await?,
                 _ => {
                     return Err(io::Error::new(
@@ -144,7 +147,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
         Ok(())
     }
 
-    fn recv_login_start(&mut self, login_start: LoginStart) -> Result<(), io::Error> {
+    async fn recv_login_start(&mut self, login_start: LoginStart) -> Result<(), io::Error> {
         self.player_uuid = Some(login_start.uuid);
         self.player_username = Some(login_start.username);
 
@@ -157,11 +160,13 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             should_authenticate: true,
         };
         let packet = Packet::new(Message::EncryptionRequest(request));
+
+        sleep(Duration::from_secs(STALL_AMOUNT)).await;
         self.send_queue.lock().unwrap().push_back(packet);
         Ok(())
     }
 
-    fn recv_encryption_response(&mut self, response: EncryptionResponse) -> io::Result<()> {
+    async fn recv_encryption_response(&mut self, response: EncryptionResponse) -> io::Result<()> {
         let shared_secret = self
             .crypto
             .private_key
@@ -192,6 +197,8 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             username: self.player_username.clone().unwrap(),
         };
         let packet = Packet::new(Message::LoginSuccess(login_success));
+
+        sleep(Duration::from_secs(STALL_AMOUNT)).await;
         self.send_queue.lock().unwrap().push_back(packet);
 
         Ok(())
@@ -204,16 +211,6 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
         };
         let packet = Packet::new(Message::Transfer(transfer));
         self.send_queue.lock().unwrap().push_back(packet);
-
-        // let send_queue = Arc::clone(&self.send_queue);
-        // tokio::spawn(async move {
-        //     let keep_alive = ClientboundKeepAlive {
-        //         keep_alive_id: 1142,
-        //     };
-        //     let packet = Packet::new(Message::ClientboundKeepAlive(keep_alive));
-        //     send_queue.lock().unwrap().push_back(packet);
-        //     sleep(Duration::from_secs(10)).await;
-        // });
 
         Ok(())
     }
