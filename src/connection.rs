@@ -1,28 +1,30 @@
 mod codec;
 mod protocol;
 
-use crate::connection::protocol::{
-    EncryptionRequest, EncryptionResponse, Handshake, HandshakeIntent, LoginStart, Message, Packet,
-    PingRequest, PingResponse, StatusRequest, StatusResponse,
-};
+use crate::connection::protocol::{EncryptionRequest, EncryptionResponse, Handshake, HandshakeIntent, LoginStart, LoginSuccess, Message, Packet, PingRequest, PingResponse, StatusRequest, StatusResponse};
 use crate::util::AsyncPeek;
 use std::collections::VecDeque;
 use std::io::ErrorKind::InvalidData;
+use aes::Aes128;
+use cfb8::Cfb8;
+use cfb8::cipher::{NewCipher, AsyncStreamCipher};
 use rand::Rng;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use rsa::pkcs1::EncodeRsaPublicKey;
 use rsa::pkcs8::EncodePublicKey;
 use tokio::io;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter};
+use uuid::Uuid;
 
-type Aes128Cfb8Enc = cfb8::Encryptor<aes::Aes128>;
-type Aes128Cfb8Dec = cfb8::Decryptor<aes::Aes128>;
+type AesCfb8 = Cfb8<Aes128>;
 
 pub struct Connection<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
     stream: S,
     send_queue: VecDeque<Packet<'a>>,
     path: Option<HandshakeIntent>,
     crypto: Crypto,
+    player_uuid: Option<Uuid>,
+    player_username: Option<String>,
 }
 
 impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
@@ -32,6 +34,8 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
             send_queue: VecDeque::new(),
             path: None,
             crypto: Crypto::new(),
+            player_uuid: None,
+            player_username: None,
         }
     }
 
@@ -39,7 +43,15 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
         loop {
             while let Some(packet) = self.send_queue.pop_front() {
                 println!("sending: {:?}", packet);
-                packet.write_to(&mut self.stream).await?;
+
+                let mut buf = Vec::new();
+                packet.write_to(&mut buf).await?;
+
+                if let Some(cipher) = &mut self.crypto.encrypt_cipher {
+                    cipher.encrypt(buf.as_mut_slice());
+                }
+
+                self.stream.write_all(buf.as_slice()).await?;
             }
 
             // For now, always read when there's nothing to write. This works because the server
@@ -62,6 +74,7 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
                 Message::PingRequest(request) => self.recv_ping_request(request)?,
                 Message::LoginStart(login_start) => self.recv_login_start(login_start)?,
                 Message::EncryptionResponse(response) => self.recv_encryption_response(response)?,
+                Message::LoginAcknowledged(_) => {},
                 _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::Unsupported,
@@ -103,6 +116,9 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
     }
 
     fn recv_login_start(&mut self, login_start: LoginStart) -> Result<(), io::Error> {
+        self.player_uuid = Some(login_start.uuid);
+        self.player_username = Some(login_start.username);
+
         let public_key = self.crypto.public_key.to_public_key_der().unwrap();
 
         let request = EncryptionRequest {
@@ -131,6 +147,22 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
             return Err(io::Error::new(InvalidData, "invalid verify token"));
         }
 
+        self.crypto.encrypt_cipher = Some(AesCfb8::new_from_slices(
+            shared_secret.as_slice(),
+            shared_secret.as_slice()
+        ).unwrap());
+        self.crypto.decrypt_cipher = Some(AesCfb8::new_from_slices(
+            shared_secret.as_slice(),
+            shared_secret.as_slice(),
+        ).unwrap());
+
+        let login_success = LoginSuccess {
+            uuid: self.player_uuid.unwrap(),
+            username: self.player_username.clone().unwrap(),
+        };
+        let packet = Packet::new(Message::LoginSuccess(login_success));
+        self.send_queue.push_back(packet);
+
         Ok(())
     }
 }
@@ -139,6 +171,8 @@ struct Crypto {
     private_key: RsaPrivateKey,
     public_key: RsaPublicKey,
     verify_token: Vec<u8>,
+    encrypt_cipher: Option<AesCfb8>,
+    decrypt_cipher: Option<AesCfb8>,
 }
 
 impl Crypto {
@@ -156,6 +190,8 @@ impl Crypto {
             private_key,
             public_key,
             verify_token,
+            encrypt_cipher: None,
+            decrypt_cipher: None,
         }
     }
 }

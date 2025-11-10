@@ -7,6 +7,6 @@ mod packet;
 mod status;
 
 pub use handshake::{Handshake, HandshakeIntent, Message};
-pub use login::{EncryptionRequest, EncryptionResponse, LoginStart};
+pub use login::{EncryptionRequest, EncryptionResponse, LoginStart, LoginSuccess, LoginAcknowledged};
 pub use packet::Packet;
 pub use status::{PingRequest, PingResponse, StatusRequest, StatusResponse};

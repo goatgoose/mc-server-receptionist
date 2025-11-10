@@ -1,4 +1,4 @@
-use crate::connection::codec::{PrefixedArray, VarIntString};
+use crate::connection::codec::{PrefixedArray, VarInt, VarIntString};
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
@@ -53,3 +53,23 @@ impl EncryptionResponse {
         })
     }
 }
+
+#[derive(Debug)]
+pub struct LoginSuccess {
+    pub uuid: Uuid,
+    pub username: String,
+}
+
+impl LoginSuccess {
+    pub async fn write_to<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_u128(self.uuid.as_u128()).await?;
+        self.username.to_var_int_string(writer).await?;
+        // empty properties array
+        0.to_var_int(writer).await?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct LoginAcknowledged {}
