@@ -1,6 +1,6 @@
 use crate::connection::codec::{VarInt, VarIntString};
 use std::io;
-use tokio::io::AsyncWrite;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 #[derive(Debug)]
 pub struct Transfer {
@@ -13,5 +13,16 @@ impl Transfer {
         self.hostname.to_var_int_string(writer).await?;
         (self.port as i32).to_var_int(writer).await?;
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct ClientboundKeepAlive {
+    pub keep_alive_id: i64,
+}
+
+impl ClientboundKeepAlive {
+    pub async fn write_to<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_i64(self.keep_alive_id).await
     }
 }

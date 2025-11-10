@@ -88,6 +88,11 @@ impl Packet {
                 packet_id.to_var_int(&mut buf).await?;
                 transfer.write_to(&mut buf).await?;
             }
+            Message::ClientboundKeepAlive(keep_alive) => {
+                let packet_id = 0x04;
+                packet_id.to_var_int(&mut buf).await?;
+                keep_alive.write_to(&mut buf).await?;
+            }
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::Unsupported,

@@ -7,7 +7,7 @@ mod login;
 mod packet;
 mod status;
 
-pub use configuration::Transfer;
+pub use configuration::{Transfer, ClientboundKeepAlive};
 pub use handshake::{Handshake, HandshakeIntent, Message};
 pub use login::{
     EncryptionRequest, EncryptionResponse, LoginAcknowledged, LoginStart, LoginSuccess,

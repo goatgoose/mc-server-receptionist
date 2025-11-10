@@ -4,7 +4,7 @@ mod protocol;
 use crate::connection::protocol::{
     EncryptionRequest, EncryptionResponse, Handshake, HandshakeIntent, LoginAcknowledged,
     LoginStart, LoginSuccess, Message, Packet, PingRequest, PingResponse, StatusRequest,
-    StatusResponse, Transfer,
+    StatusResponse, Transfer, ClientboundKeepAlive,
 };
 use crate::util::AsyncPeek;
 use aes::Aes128;
@@ -17,16 +17,19 @@ use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use std::collections::VecDeque;
 use std::io::ErrorKind::InvalidData;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
+use std::time::Duration;
 use tokio::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter, ReadBuf};
+use tokio::time::sleep;
 use uuid::Uuid;
 
 type AesCfb8 = Cfb8<Aes128>;
 
 pub struct Connection<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
     stream: S,
-    send_queue: VecDeque<Packet>,
+    send_queue: Arc<Mutex<VecDeque<Packet>>>,
     path: Option<HandshakeIntent>,
     crypto: Crypto,
     player_uuid: Option<Uuid>,
@@ -37,7 +40,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
     pub fn new(stream: S) -> Self {
         Connection {
             stream,
-            send_queue: VecDeque::new(),
+            send_queue: Arc::new(Mutex::new(VecDeque::new())),
             path: None,
             crypto: Crypto::new(),
             player_uuid: None,
@@ -47,7 +50,13 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
 
     pub async fn process(&mut self) -> Result<(), io::Error> {
         loop {
-            while let Some(packet) = self.send_queue.pop_front() {
+            let packets_to_send: Vec<Packet> = {
+                let mut queue = self.send_queue.lock().unwrap();
+                let len = queue.len();
+                queue.drain(0..len).collect()
+            };
+
+            for packet in packets_to_send {
                 println!("sending: {:?}", packet);
 
                 let mut buf = Vec::new();
@@ -94,7 +103,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
                 Message::PingRequest(request) => self.recv_ping_request(request)?,
                 Message::LoginStart(login_start) => self.recv_login_start(login_start)?,
                 Message::EncryptionResponse(response) => self.recv_encryption_response(response)?,
-                Message::LoginAcknowledged(ack) => self.recv_login_ack(ack)?,
+                Message::LoginAcknowledged(ack) => self.recv_login_ack(ack).await?,
                 _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::Unsupported,
@@ -122,7 +131,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             favicon: "".to_string(),
         };
         let packet = Packet::new(Message::StatusResponse(response));
-        self.send_queue.push_back(packet);
+        self.send_queue.lock().unwrap().push_back(packet);
         Ok(())
     }
 
@@ -131,7 +140,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             timestamp: ping_request.timestamp,
         };
         let packet = Packet::new(Message::PingResponse(response));
-        self.send_queue.push_back(packet);
+        self.send_queue.lock().unwrap().push_back(packet);
         Ok(())
     }
 
@@ -148,7 +157,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             should_authenticate: true,
         };
         let packet = Packet::new(Message::EncryptionRequest(request));
-        self.send_queue.push_back(packet);
+        self.send_queue.lock().unwrap().push_back(packet);
         Ok(())
     }
 
@@ -183,18 +192,28 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             username: self.player_username.clone().unwrap(),
         };
         let packet = Packet::new(Message::LoginSuccess(login_success));
-        self.send_queue.push_back(packet);
+        self.send_queue.lock().unwrap().push_back(packet);
 
         Ok(())
     }
 
-    fn recv_login_ack(&mut self, ack: LoginAcknowledged) -> io::Result<()> {
+    async fn recv_login_ack(&mut self, ack: LoginAcknowledged) -> io::Result<()> {
         let transfer = Transfer {
-            hostname: "classic.goatgoose.com".to_string(),
-            port: 25565,
+            hostname: "localhost".to_string(),
+            port: 25564,
         };
         let packet = Packet::new(Message::Transfer(transfer));
-        self.send_queue.push_back(packet);
+        self.send_queue.lock().unwrap().push_back(packet);
+
+        // let send_queue = Arc::clone(&self.send_queue);
+        // tokio::spawn(async move {
+        //     let keep_alive = ClientboundKeepAlive {
+        //         keep_alive_id: 1142,
+        //     };
+        //     let packet = Packet::new(Message::ClientboundKeepAlive(keep_alive));
+        //     send_queue.lock().unwrap().push_back(packet);
+        //     sleep(Duration::from_secs(10)).await;
+        // });
 
         Ok(())
     }

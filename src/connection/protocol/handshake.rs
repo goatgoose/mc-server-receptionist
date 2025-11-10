@@ -5,6 +5,7 @@ use crate::connection::protocol::{
 };
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt};
+use crate::connection::protocol::configuration::ClientboundKeepAlive;
 
 #[derive(Debug)]
 pub enum Message {
@@ -19,6 +20,7 @@ pub enum Message {
     LoginSuccess(LoginSuccess),
     LoginAcknowledged(LoginAcknowledged),
     Transfer(Transfer),
+    ClientboundKeepAlive(ClientboundKeepAlive),
 }
 
 #[derive(Debug)]
