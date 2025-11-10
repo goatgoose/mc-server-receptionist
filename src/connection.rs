@@ -72,10 +72,19 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
 
             let packet = if let Some(cipher) = &mut self.crypto.decrypt_cipher {
                 let mut reader = DecryptingReader::new(&mut self.stream, cipher);
-                Packet::read_from(&mut reader, self.path).await?
+                Packet::read_from(&mut reader, self.path).await
             } else {
-                Packet::read_from(&mut self.stream, self.path).await?
+                Packet::read_from(&mut self.stream, self.path).await
             };
+
+            if let Err(e) = &packet
+                && e.kind() == io::ErrorKind::Unsupported
+            {
+                eprintln!("{}", e);
+                continue;
+            }
+
+            let packet = packet?;
             println!("received: {:?}", packet);
 
             match packet.message {

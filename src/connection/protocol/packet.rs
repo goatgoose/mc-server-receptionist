@@ -23,44 +23,40 @@ impl Packet {
 
         let message = match connection_path {
             None => match id {
-                0x00 => Message::Handshake(Handshake::read_from(reader).await?),
-                _ => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Unsupported,
-                        format!("Unknown packet ID: {:x}", id),
-                    ));
-                }
+                0x00 => Some(Message::Handshake(Handshake::read_from(reader).await?)),
+                _ => None,
             },
             Some(HandshakeIntent::Status) => match id {
-                0x00 => Message::StatusRequest(StatusRequest {}),
-                0x01 => Message::PingRequest(PingRequest::read_from(reader).await?),
-                _ => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Unsupported,
-                        format!("Unrecognized status packet received: {:x}", id),
-                    ));
-                }
+                0x00 => Some(Message::StatusRequest(StatusRequest {})),
+                0x01 => Some(Message::PingRequest(PingRequest::read_from(reader).await?)),
+                _ => None,
             },
             Some(HandshakeIntent::Login) => match id {
-                0x00 => Message::LoginStart(LoginStart::read_from(reader).await?),
-                0x01 => Message::EncryptionResponse(EncryptionResponse::read_from(reader).await?),
-                0x03 => Message::LoginAcknowledged(LoginAcknowledged {}),
-                _ => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Unsupported,
-                        format!("Unrecognized login packet received: {:x}", id),
-                    ));
-                }
+                0x00 => Some(Message::LoginStart(LoginStart::read_from(reader).await?)),
+                0x01 => Some(Message::EncryptionResponse(
+                    EncryptionResponse::read_from(reader).await?,
+                )),
+                0x03 => Some(Message::LoginAcknowledged(LoginAcknowledged {})),
+                _ => None,
             },
-            Some(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    "Unsupported connection path",
-                ));
-            }
+            Some(_) => None,
         };
 
-        Ok(Packet { message })
+        match message {
+            Some(message) => Ok(Packet { message }),
+            None => {
+                let mut unrecognized_bytes = vec![0; length as usize];
+                reader.read_exact(&mut unrecognized_bytes).await?;
+
+                Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    format!(
+                        "Unrecognized packet received: {:X} for path {:?}",
+                        id, connection_path
+                    ),
+                ))
+            }
+        }
     }
 
     pub async fn write_to<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> io::Result<()> {
