@@ -5,12 +5,12 @@ use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 #[derive(Debug)]
-pub struct Packet<'a> {
-    pub message: Message<'a>,
+pub struct Packet {
+    pub message: Message,
 }
 
-impl<'a> Packet<'a> {
-    pub fn new(message: Message<'a>) -> Self {
+impl Packet {
+    pub fn new(message: Message) -> Self {
         Packet { message }
     }
 
@@ -37,7 +37,7 @@ impl<'a> Packet<'a> {
                 _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::Unsupported,
-                        "Unrecognized status packet received",
+                        format!("Unrecognized status packet received: {:x}", id),
                     ));
                 }
             },
@@ -48,7 +48,7 @@ impl<'a> Packet<'a> {
                 _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::Unsupported,
-                        "Unrecognized login packet received",
+                        format!("Unrecognized login packet received: {:x}", id),
                     ));
                 }
             },

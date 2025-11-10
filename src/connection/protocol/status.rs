@@ -7,17 +7,17 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 pub struct StatusRequest {}
 
 #[derive(Debug)]
-pub struct StatusResponse<'a> {
-    pub version_name: &'a str,
+pub struct StatusResponse {
+    pub version_name: String,
     pub version_protocol: u32,
     pub max_players: u32,
     pub online_players: u32,
     //pub player_samples: Vec<PlayerSample<'a>>,
-    pub description: &'a str,
-    pub favicon: &'a str,
+    pub description: String,
+    pub favicon: String,
 }
 
-impl<'a> StatusResponse<'a> {
+impl StatusResponse {
     pub async fn write_to<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> io::Result<()> {
         let response_json = json!({
             "version": {

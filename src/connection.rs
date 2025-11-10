@@ -1,33 +1,38 @@
 mod codec;
 mod protocol;
 
-use crate::connection::protocol::{EncryptionRequest, EncryptionResponse, Handshake, HandshakeIntent, LoginStart, LoginSuccess, Message, Packet, PingRequest, PingResponse, StatusRequest, StatusResponse};
+use crate::connection::protocol::{
+    EncryptionRequest, EncryptionResponse, Handshake, HandshakeIntent, LoginStart, LoginSuccess,
+    Message, Packet, PingRequest, PingResponse, StatusRequest, StatusResponse,
+};
 use crate::util::AsyncPeek;
-use std::collections::VecDeque;
-use std::io::ErrorKind::InvalidData;
 use aes::Aes128;
 use cfb8::Cfb8;
-use cfb8::cipher::{NewCipher, AsyncStreamCipher};
+use cfb8::cipher::{AsyncStreamCipher, NewCipher};
 use rand::Rng;
-use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use rsa::pkcs1::EncodeRsaPublicKey;
 use rsa::pkcs8::EncodePublicKey;
+use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
+use std::collections::VecDeque;
+use std::io::ErrorKind::InvalidData;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio::io;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter, ReadBuf};
 use uuid::Uuid;
 
 type AesCfb8 = Cfb8<Aes128>;
 
-pub struct Connection<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
+pub struct Connection<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
     stream: S,
-    send_queue: VecDeque<Packet<'a>>,
+    send_queue: VecDeque<Packet>,
     path: Option<HandshakeIntent>,
     crypto: Crypto,
     player_uuid: Option<Uuid>,
     player_username: Option<String>,
 }
 
-impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
+impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
     pub fn new(stream: S) -> Self {
         Connection {
             stream,
@@ -65,7 +70,12 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
                 Err(e) => return Err(e),
             }
 
-            let packet = Packet::read_from(&mut self.stream, self.path).await?;
+            let packet = if let Some(cipher) = &mut self.crypto.decrypt_cipher {
+                let mut reader = DecryptingReader::new(&mut self.stream, cipher);
+                Packet::read_from(&mut reader, self.path).await?
+            } else {
+                Packet::read_from(&mut self.stream, self.path).await?
+            };
             println!("received: {:?}", packet);
 
             match packet.message {
@@ -74,7 +84,7 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
                 Message::PingRequest(request) => self.recv_ping_request(request)?,
                 Message::LoginStart(login_start) => self.recv_login_start(login_start)?,
                 Message::EncryptionResponse(response) => self.recv_encryption_response(response)?,
-                Message::LoginAcknowledged(_) => {},
+                Message::LoginAcknowledged(_) => {}
                 _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::Unsupported,
@@ -94,12 +104,12 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
 
     fn recv_status_request(&mut self, status_request: StatusRequest) -> Result<(), io::Error> {
         let response = StatusResponse {
-            version_name: "1.21.10",
+            version_name: "1.21.10".to_string(),
             version_protocol: 773,
             max_players: 20,
             online_players: 0,
-            description: "A fake MC server!",
-            favicon: "",
+            description: "A fake MC server!".to_string(),
+            favicon: "".to_string(),
         };
         let packet = Packet::new(Message::StatusResponse(response));
         self.send_queue.push_back(packet);
@@ -133,10 +143,14 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
     }
 
     fn recv_encryption_response(&mut self, response: EncryptionResponse) -> io::Result<()> {
-        let shared_secret = self.crypto.private_key
+        let shared_secret = self
+            .crypto
+            .private_key
             .decrypt(Pkcs1v15Encrypt, response.shared_secret.as_slice())
             .map_err(|_| io::Error::new(InvalidData, "Unable to decrypt shared secret"))?;
-        let verify_token = self.crypto.private_key
+        let verify_token = self
+            .crypto
+            .private_key
             .decrypt(Pkcs1v15Encrypt, response.verify_token.as_slice())
             .map_err(|_| io::Error::new(InvalidData, "Unable to decrypt verify token"))?;
 
@@ -147,14 +161,12 @@ impl<'a, S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<'a, S> {
             return Err(io::Error::new(InvalidData, "invalid verify token"));
         }
 
-        self.crypto.encrypt_cipher = Some(AesCfb8::new_from_slices(
-            shared_secret.as_slice(),
-            shared_secret.as_slice()
-        ).unwrap());
-        self.crypto.decrypt_cipher = Some(AesCfb8::new_from_slices(
-            shared_secret.as_slice(),
-            shared_secret.as_slice(),
-        ).unwrap());
+        self.crypto.encrypt_cipher = Some(
+            AesCfb8::new_from_slices(shared_secret.as_slice(), shared_secret.as_slice()).unwrap(),
+        );
+        self.crypto.decrypt_cipher = Some(
+            AesCfb8::new_from_slices(shared_secret.as_slice(), shared_secret.as_slice()).unwrap(),
+        );
 
         let login_success = LoginSuccess {
             uuid: self.player_uuid.unwrap(),
@@ -178,8 +190,7 @@ struct Crypto {
 impl Crypto {
     pub fn new() -> Self {
         let mut rng = rand::thread_rng();
-        let private_key = RsaPrivateKey::new(&mut rng, 1024)
-            .expect("Failed to generate a key.");
+        let private_key = RsaPrivateKey::new(&mut rng, 1024).expect("Failed to generate a key.");
         let public_key = RsaPublicKey::from(&private_key);
 
         let mut verify_token = [0u8; 16];
@@ -193,5 +204,37 @@ impl Crypto {
             encrypt_cipher: None,
             decrypt_cipher: None,
         }
+    }
+}
+
+struct DecryptingReader<'a, R: AsyncRead + Unpin> {
+    reader: &'a mut R,
+    cipher: &'a mut AesCfb8,
+}
+
+impl<'a, R: AsyncRead + Unpin> DecryptingReader<'a, R> {
+    pub fn new(reader: &'a mut R, cipher: &'a mut AesCfb8) -> Self {
+        DecryptingReader { reader, cipher }
+    }
+}
+
+impl<'a, R: AsyncRead + Unpin> AsyncRead for DecryptingReader<'a, R> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let before = buf.filled().len();
+        let self_mut = self.get_mut();
+        let result = Pin::new(&mut self_mut.reader).poll_read(cx, buf);
+        if let Poll::Ready(Ok(())) = result {
+            let after = buf.filled().len();
+            if after > before {
+                let filled = buf.filled_mut();
+                self_mut.cipher.decrypt(&mut filled[before..after]);
+            }
+        }
+
+        result
     }
 }
