@@ -2,7 +2,7 @@ use crate::connection::codec::{VarInt, VarIntString};
 use std::io;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Transfer {
     pub hostname: String,
     pub port: u16,

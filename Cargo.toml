@@ -15,3 +15,6 @@ rand = "0.8.5"
 cfb8 = { version = "0.7" }
 aes = { version = "0.7" }
 async-trait = { version = "0.1" }
+toml = { version = "0.9" }
+aws-sdk-ec2 = { version = "1" }
+aws-config = { version = "1" }
