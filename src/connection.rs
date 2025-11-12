@@ -3,7 +3,7 @@ mod protocol;
 
 use crate::connection::protocol::{
     EncryptionRequest, EncryptionResponse, Handshake, HandshakeIntent, LoginAcknowledged,
-    LoginStart, LoginSuccess, Message, Packet, PingRequest, PingResponse, StatusRequest,
+    LoginSuccess, Message, Packet, PingRequest, PingResponse, StatusRequest,
     StatusResponse, Transfer, ClientboundKeepAlive,
 };
 use crate::util::AsyncPeek;
@@ -21,14 +21,20 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter, ReadBuf};
+use tokio::io::{join, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter, ReadBuf};
 use tokio::time::sleep;
 use uuid::Uuid;
+
+pub use protocol::LoginStart;
 
 // Buy as much time as possible to allow for the server to come up without timing out.
 const STALL_AMOUNT: u64 = 15;
 
 type AesCfb8 = Cfb8<Aes128>;
+
+pub trait JoinCallback: 'static + Send + Sync {
+    fn on_join(&self, login_start: &LoginStart);
+}
 
 pub struct Connection<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
     stream: S,
@@ -37,10 +43,11 @@ pub struct Connection<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
     crypto: Crypto,
     player_uuid: Option<Uuid>,
     player_username: Option<String>,
+    join_callback: Box<dyn JoinCallback>
 }
 
 impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
-    pub fn new(stream: S) -> Self {
+    pub fn new<J: JoinCallback>(stream: S, join_callback: J) -> Self {
         Connection {
             stream,
             send_queue: Arc::new(Mutex::new(VecDeque::new())),
@@ -48,6 +55,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             crypto: Crypto::new(),
             player_uuid: None,
             player_username: None,
+            join_callback: Box::new(join_callback),
         }
     }
 
@@ -148,6 +156,8 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
     }
 
     async fn recv_login_start(&mut self, login_start: LoginStart) -> Result<(), io::Error> {
+        self.join_callback.on_join(&login_start);
+
         self.player_uuid = Some(login_start.uuid);
         self.player_username = Some(login_start.username);
 
