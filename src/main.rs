@@ -1,7 +1,7 @@
 mod connection;
-mod elastic_ip_manager;
 mod receptionist;
 mod util;
+mod ec2;
 
 use receptionist::Receptionist;
 use tokio::io;

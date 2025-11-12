@@ -14,3 +14,4 @@ rsa = { version = "0.9" }
 rand = "0.8.5"
 cfb8 = { version = "0.7" }
 aes = { version = "0.7" }
+async-trait = { version = "0.1" }

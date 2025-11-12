@@ -1,12 +1,18 @@
-use crate::connection::{Connection, JoinCallback, LoginStart};
+use async_trait::async_trait;
+use crate::connection::{Connection, TransferHandler, LoginStart};
 use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 
 struct InstanceInitializer {}
 
-impl JoinCallback for InstanceInitializer {
-    fn on_join(&self, login_start: &LoginStart) {
+#[async_trait]
+impl TransferHandler for InstanceInitializer {
+    async fn on_join(&self, login_start: &LoginStart) {
         println!("{} joined!", login_start.username);
+    }
+
+    async fn on_transfer_ready(&self) -> Option<(String, u16)> {
+        Some(("classic.goatgoose.com".to_string(), 25565))
     }
 }
 

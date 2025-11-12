@@ -20,6 +20,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
+use async_trait::async_trait;
 use tokio::io;
 use tokio::io::{join, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter, ReadBuf};
 use tokio::time::sleep;
@@ -32,8 +33,10 @@ const STALL_AMOUNT: u64 = 15;
 
 type AesCfb8 = Cfb8<Aes128>;
 
-pub trait JoinCallback: 'static + Send + Sync {
-    fn on_join(&self, login_start: &LoginStart);
+#[async_trait]
+pub trait TransferHandler: 'static + Send + Sync {
+    async fn on_join(&self, login_start: &LoginStart);
+    async fn on_transfer_ready(&self) -> Option<(String, u16)>;
 }
 
 pub struct Connection<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
@@ -43,11 +46,11 @@ pub struct Connection<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
     crypto: Crypto,
     player_uuid: Option<Uuid>,
     player_username: Option<String>,
-    join_callback: Box<dyn JoinCallback>
+    transfer_handler: Box<dyn TransferHandler>
 }
 
 impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
-    pub fn new<J: JoinCallback>(stream: S, join_callback: J) -> Self {
+    pub fn new<J: TransferHandler>(stream: S, transfer_handler: J) -> Self {
         Connection {
             stream,
             send_queue: Arc::new(Mutex::new(VecDeque::new())),
@@ -55,7 +58,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             crypto: Crypto::new(),
             player_uuid: None,
             player_username: None,
-            join_callback: Box::new(join_callback),
+            transfer_handler: Box::new(transfer_handler),
         }
     }
 
@@ -156,7 +159,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
     }
 
     async fn recv_login_start(&mut self, login_start: LoginStart) -> Result<(), io::Error> {
-        self.join_callback.on_join(&login_start);
+        self.transfer_handler.on_join(&login_start).await;
 
         self.player_uuid = Some(login_start.uuid);
         self.player_username = Some(login_start.username);
@@ -215,12 +218,14 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
     }
 
     async fn recv_login_ack(&mut self, ack: LoginAcknowledged) -> io::Result<()> {
-        let transfer = Transfer {
-            hostname: "localhost".to_string(),
-            port: 25564,
-        };
-        let packet = Packet::new(Message::Transfer(transfer));
-        self.send_queue.lock().unwrap().push_back(packet);
+        if let Some((hostname, port)) = self.transfer_handler.on_transfer_ready().await {
+            let transfer = Transfer {
+                hostname,
+                port,
+            };
+            let packet = Packet::new(Message::Transfer(transfer));
+            self.send_queue.lock().unwrap().push_back(packet);
+        }
 
         Ok(())
     }
