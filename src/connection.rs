@@ -4,7 +4,7 @@ mod protocol;
 use crate::connection::protocol::{
     EncryptionRequest, EncryptionResponse, Handshake, HandshakeIntent, LoginAcknowledged,
     LoginSuccess, Message, Packet, PingRequest, PingResponse, StatusRequest,
-    StatusResponse, Transfer, ClientboundKeepAlive,
+    StatusResponse, ClientboundKeepAlive,
 };
 use crate::util::AsyncPeek;
 use aes::Aes128;
@@ -26,7 +26,7 @@ use tokio::io::{join, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWri
 use tokio::time::sleep;
 use uuid::Uuid;
 
-pub use protocol::LoginStart;
+pub use protocol::{LoginStart, Transfer};
 
 // Buy as much time as possible to allow for the server to come up without timing out.
 const STALL_AMOUNT: u64 = 15;
@@ -35,8 +35,8 @@ type AesCfb8 = Cfb8<Aes128>;
 
 #[async_trait]
 pub trait TransferHandler: 'static + Send + Sync {
-    async fn on_join(&self, login_start: &LoginStart);
-    async fn on_transfer_ready(&self) -> Option<(String, u16)>;
+    async fn on_join(&self, login_start: &LoginStart) -> Option<Transfer>;
+    async fn on_transfer_ready(&self) -> Option<Transfer>;
 }
 
 pub struct Connection<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
@@ -46,7 +46,8 @@ pub struct Connection<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
     crypto: Crypto,
     player_uuid: Option<Uuid>,
     player_username: Option<String>,
-    transfer_handler: Box<dyn TransferHandler>
+    transfer_handler: Box<dyn TransferHandler>,
+    transfer: Option<Transfer>
 }
 
 impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
@@ -59,6 +60,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             player_uuid: None,
             player_username: None,
             transfer_handler: Box::new(transfer_handler),
+            transfer: None,
         }
     }
 
@@ -130,6 +132,24 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
         Ok(())
     }
 
+    async fn stall(&self) {
+        // A Transfer wasn't received from the initial join, which means the server is going to be
+        // starting up. Stall as long as possible so that the user doesn't need to click out and
+        // back in again.
+        if self.transfer.is_none() {
+            sleep(Duration::from_secs(STALL_AMOUNT)).await;
+        }
+    }
+
+    async fn get_transfer(&mut self) -> Option<Transfer> {
+        // A Transfer may have already been returned from the initial join (in the case that the
+        // server was running). In that case, use this Transfer. Otherwise we need to ask for one.
+        match self.transfer.take() {
+            Some(transfer) => Some(transfer),
+            None => self.transfer_handler.on_transfer_ready().await,
+        }
+    }
+
     fn recv_handshake(&mut self, handshake: Handshake) -> Result<(), io::Error> {
         self.path = Some(handshake.intent);
         Ok(())
@@ -159,7 +179,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
     }
 
     async fn recv_login_start(&mut self, login_start: LoginStart) -> Result<(), io::Error> {
-        self.transfer_handler.on_join(&login_start).await;
+        self.transfer = self.transfer_handler.on_join(&login_start).await;
 
         self.player_uuid = Some(login_start.uuid);
         self.player_username = Some(login_start.username);
@@ -173,8 +193,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             should_authenticate: true,
         };
         let packet = Packet::new(Message::EncryptionRequest(request));
-
-        sleep(Duration::from_secs(STALL_AMOUNT)).await;
+        self.stall().await;
         self.send_queue.lock().unwrap().push_back(packet);
         Ok(())
     }
@@ -211,22 +230,17 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
         };
         let packet = Packet::new(Message::LoginSuccess(login_success));
 
-        sleep(Duration::from_secs(STALL_AMOUNT)).await;
+        self.stall().await;
         self.send_queue.lock().unwrap().push_back(packet);
 
         Ok(())
     }
 
     async fn recv_login_ack(&mut self, ack: LoginAcknowledged) -> io::Result<()> {
-        if let Some((hostname, port)) = self.transfer_handler.on_transfer_ready().await {
-            let transfer = Transfer {
-                hostname,
-                port,
-            };
+        if let Some(transfer) = self.get_transfer().await {
             let packet = Packet::new(Message::Transfer(transfer));
             self.send_queue.lock().unwrap().push_back(packet);
         }
-
         Ok(())
     }
 }

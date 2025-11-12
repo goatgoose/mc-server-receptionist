@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use crate::connection::{Connection, TransferHandler, LoginStart};
+use crate::connection::{Connection, TransferHandler, LoginStart, Transfer};
 use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 
@@ -7,12 +7,20 @@ struct InstanceInitializer {}
 
 #[async_trait]
 impl TransferHandler for InstanceInitializer {
-    async fn on_join(&self, login_start: &LoginStart) {
+    async fn on_join(&self, login_start: &LoginStart) -> Option<Transfer> {
         println!("{} joined!", login_start.username);
+        // Some(Transfer {
+        //     hostname: "classic.goatgoose.com".to_string(),
+        //     port: 25565,
+        // })
+        None
     }
 
-    async fn on_transfer_ready(&self) -> Option<(String, u16)> {
-        Some(("classic.goatgoose.com".to_string(), 25565))
+    async fn on_transfer_ready(&self) -> Option<Transfer> {
+        Some(Transfer {
+            hostname: "classic.goatgoose.com".to_string(),
+            port: 25565,
+        })
     }
 }
 
