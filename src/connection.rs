@@ -132,12 +132,12 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
         Ok(())
     }
 
-    async fn stall(&self) {
+    async fn stall(&self, stall_amount: u64) {
         // A Transfer wasn't received from the initial join, which means the server is going to be
         // starting up. Stall as long as possible so that the user doesn't need to click out and
         // back in again.
         if self.transfer.is_none() {
-            sleep(Duration::from_secs(STALL_AMOUNT)).await;
+            sleep(Duration::from_secs(stall_amount)).await;
         }
     }
 
@@ -193,7 +193,9 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             should_authenticate: true,
         };
         let packet = Packet::new(Message::EncryptionRequest(request));
-        self.stall().await;
+        // stall for a bit less on the first request to get past the "Establishing Connection..."
+        // message.
+        self.stall(STALL_AMOUNT - 5).await;
         self.send_queue.lock().unwrap().push_back(packet);
         Ok(())
     }
@@ -230,13 +232,14 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
         };
         let packet = Packet::new(Message::LoginSuccess(login_success));
 
-        self.stall().await;
+        self.stall(STALL_AMOUNT).await;
         self.send_queue.lock().unwrap().push_back(packet);
 
         Ok(())
     }
 
     async fn recv_login_ack(&mut self, ack: LoginAcknowledged) -> io::Result<()> {
+        self.stall(STALL_AMOUNT).await;
         if let Some(transfer) = self.get_transfer().await {
             let packet = Packet::new(Message::Transfer(transfer));
             self.send_queue.lock().unwrap().push_back(packet);
