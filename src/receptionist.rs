@@ -105,6 +105,7 @@ impl TransferHandler for InstanceManager {
 
 pub struct Receptionist {
     instance_manager: InstanceManager,
+    motd: String,
 }
 
 impl Receptionist {
@@ -121,6 +122,7 @@ impl Receptionist {
 
         Receptionist {
             instance_manager,
+            motd: mc_target_motd,
         }
     }
 
@@ -133,9 +135,13 @@ impl Receptionist {
             println!("Accepted connection from: {}", &addr);
 
             let instance_manager = self.instance_manager.clone();
-
+            let motd = self.motd.clone();
             tokio::spawn(async move {
-                let mut connection = Connection::new(stream, instance_manager);
+                let mut connection = Connection::new(
+                    stream,
+                    instance_manager,
+                    motd,
+                );
                 match connection.process().await {
                     Ok(_) => {}
                     Err(e) => {

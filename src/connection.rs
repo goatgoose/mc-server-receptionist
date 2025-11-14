@@ -47,11 +47,12 @@ pub struct Connection<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> {
     player_uuid: Option<Uuid>,
     player_username: Option<String>,
     transfer_handler: Box<dyn TransferHandler>,
-    transfer: Option<Transfer>
+    transfer: Option<Transfer>,
+    motd: String,
 }
 
 impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
-    pub fn new<J: TransferHandler>(stream: S, transfer_handler: J) -> Self {
+    pub fn new<J: TransferHandler>(stream: S, transfer_handler: J, motd: String) -> Self {
         Connection {
             stream,
             send_queue: Arc::new(Mutex::new(VecDeque::new())),
@@ -61,6 +62,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             player_username: None,
             transfer_handler: Box::new(transfer_handler),
             transfer: None,
+            motd,
         }
     }
 
@@ -161,7 +163,7 @@ impl<S: AsyncRead + AsyncWrite + AsyncPeek + Unpin> Connection<S> {
             version_protocol: 773,
             max_players: 20,
             online_players: 0,
-            description: "A fake MC server!".to_string(),
+            description: self.motd.clone(),
             favicon: "".to_string(),
         };
         let packet = Packet::new(Message::StatusResponse(response));
